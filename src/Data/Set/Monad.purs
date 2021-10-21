@@ -1,20 +1,29 @@
 module Data.Set.Monad 
   ( Set
   , run
-  , difference, (\\)
+  , fromFoldable
+  , toUnfoldable
   , empty
-  , size
-  , member, notMember
   , isEmpty
-  , subset
-  , fromArray
+  , singleton
+  , map
+  , insert
+  , member, notMember
+  , delete
+  , size
   , union
+  , difference, (\\)
+  , subset
   ) where
 
 import Prelude
 
-import Data.Foldable (foldl)
+import Data.Foldable (class Foldable)
+import Data.Foldable (foldl) as F
+import Data.List (List)
+import Data.List (toUnfoldable) as List
 import Data.Set as S
+import Data.Unfoldable (class Unfoldable)
 
 -- data Set a where
 --   Prim   :: (Ord a) => S.Set a -> Set a
@@ -39,7 +48,7 @@ run (Zero)       = S.empty
 run (Plus ma mb) = run ma `S.union` run mb
 run (Bind e)     = e \x f -> 
   case x of
-    Prim s               -> foldl S.union S.empty (S.map (run <<< f) $ s identity)
+    Prim s               -> F.foldl S.union S.empty (S.map (run <<< f) $ s identity)
     Return a             -> run (f a)
     Zero                 -> S.empty
     Plus (Prim s) ma     -> run $ bind' (s \z -> prim $ S.union z (run ma)) f
@@ -81,6 +90,15 @@ instance (Ord a) => Monoid (Set a) where
 instance (Show a, Ord a) => Show (Set a) where
   show = show <<< run
 
+toUnfoldable :: forall f a. Unfoldable f => Ord a => Set a -> f a
+toUnfoldable = List.toUnfoldable <<< toList
+
+fromFoldable :: forall f a. Foldable f => Ord a => f a -> Set a
+fromFoldable = F.foldl (\m a -> insert a m) empty
+
+toList :: forall a. (Ord a) => Set a -> List a
+toList = S.toUnfoldable <<< run
+
 difference :: forall a. (Ord a) => Set a -> Set a -> Set a
 difference m1 m2 = difference m1 m2
 
@@ -104,8 +122,25 @@ subset s1 s2 = S.subset (run s1) (run s2)
 empty :: forall a. (Ord a) => Set a
 empty = prim S.empty
 
-fromArray :: forall a. (Ord a) => Array a -> Set a
-fromArray as = prim (S.fromFoldable as)
-
 union :: forall a. (Ord a) => Set a -> Set a -> Set a
 union s1 s2 = prim (run s1 `S.union` run s2)
+
+singleton :: forall a. (Ord a) => a -> Set a
+singleton a = prim (S.singleton a)
+
+-- | Maps over the values in a set.
+-- |
+-- | This operation is not structure-preserving for sets, so is not a valid
+-- | `Functor`. An example case: mapping `const x` over a set with `n > 0`
+-- | elements will result in a set with one element.
+map :: forall a b. Ord a => Ord b => (a -> b) -> Set a -> Set b
+map f = foldl (\m a -> insert (f a) m) empty
+
+insert :: forall a. (Ord a) => a -> Set a -> Set a
+insert a s = prim (S.insert a (run s))
+
+delete :: forall a. (Ord a) => a -> Set a -> Set a
+delete a s = prim (S.delete a (run s))
+
+foldl :: forall a b. (Ord a) => (b -> a -> b) -> b -> Set a -> b
+foldl f z s = F.foldl f z (run s)
